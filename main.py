@@ -1,7 +1,7 @@
 import os
 import logging
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Настройка логирования
 logging.basicConfig(
@@ -17,32 +17,31 @@ if not BOT_TOKEN:
     logger.error("❌ Токен не найден! Убедитесь, что переменная TOKEN установлена в настройках Render.")
     exit(1)
 
-# Упрощенные классы для минимальной функциональности
 class YandexVision:
-    def extract_text_from_image(self, file_path):
+    async def extract_text_from_image(self, file_path: str) -> str:
         """Заглушка для распознавания текста"""
         logger.info(f"📷 Обработка изображения: {file_path}")
         # В реальной реализации здесь будет вызов Yandex Vision API
         return "Cu 75.45%, Ni 12.50%, Zn 9.76%"  # Заглушка для теста
 
 class CompositionAnalyzer:
-    def parse_composition(self, text):
+    def parse_composition(self, text: str) -> dict:
         """Парсит химический состав из текста"""
         logger.info(f"🔬 Анализ текста: {text}")
         
-        # Простой парсер для демонстрации
         composition = {}
         words = text.split()
         
         elements = ['Cu', 'Zn', 'Pb', 'Fe', 'Al', 'Ni', 'Sn', 'Ti', 'Si', 'C', 'Mn', 'Cr', 'Mg']
         
         for i, word in enumerate(words):
-            if word in elements:
+            clean_word = word.strip('.,:;%')
+            if clean_word in elements:
                 # Ищем число после элемента
                 if i + 1 < len(words):
                     next_word = words[i + 1].replace('%', '').replace(',', '')
                     try:
-                        composition[word] = float(next_word)
+                        composition[clean_word] = float(next_word)
                     except ValueError:
                         continue
         
@@ -52,7 +51,7 @@ class CompositionAnalyzer:
             
         return composition
 
-    def analyze_composition(self, composition):
+    def analyze_composition(self, composition: dict) -> dict:
         """Анализирует химический состав"""
         main_element = max(composition.items(), key=lambda x: x[1]) if composition else None
         
@@ -63,7 +62,7 @@ class CompositionAnalyzer:
             'recommendations': ['Состав выглядит корректным']
         }
     
-    def _get_alloy_description(self, composition):
+    def _get_alloy_description(self, composition: dict) -> str:
         """Возвращает описание сплава"""
         if 'Cu' in composition and composition['Cu'] > 50:
             return "Этот сплав состоит в основном из **меди (Cu)**, что характерно для латуней или бронз."
@@ -74,7 +73,7 @@ class CompositionAnalyzer:
         else:
             return "Это сложный многокомпонентный сплав с интересными свойствами."
 
-    def _get_applications(self, composition):
+    def _get_applications(self, composition: dict) -> list:
         """Возвращает возможные применения"""
         apps = []
         if 'Cu' in composition:
@@ -86,7 +85,7 @@ class CompositionAnalyzer:
         
         return apps[:4] if apps else ["различные технические применения"]
 
-    def get_element_descriptions(self, composition):
+    def get_element_descriptions(self, composition: dict) -> list:
         """Возвращает описания элементов"""
         descriptions = {
             'Cu': "**медь** — основа сплава, обеспечивает электропроводность и пластичность",
@@ -105,15 +104,15 @@ class CompositionAnalyzer:
         
         return result
 
-    def filter_relevant_alloys(self, composition, matches):
+    def filter_relevant_alloys(self, composition: dict, matches: list) -> list:
         """Фильтрует релевантные сплавы"""
         return [match for match in matches if match.get('score', 0) > 0.3]
 
 class AlloyDatabase:
-    def __init__(self, db_path):
+    def __init__(self, db_path: str):
         self.alloys = self._load_demo_data()
     
-    def _load_demo_data(self):
+    def _load_demo_data(self) -> list:
         """Загружает демо-базу сплавов"""
         return [
             {'name': 'Латунь Л63', 'composition': {'Cu': 62.0, 'Zn': 38.0}, 'score': 0.85},
@@ -123,9 +122,8 @@ class AlloyDatabase:
             {'name': 'Алюминиевый сплав АМг6', 'composition': {'Al': 94.0, 'Mg': 6.0}, 'score': 0.35}
         ]
     
-    def find_matching_alloys(self, composition):
+    def find_matching_alloys(self, composition: dict) -> list:
         """Находит подходящие сплавы в базе"""
-        # Упрощенный алгоритм поиска для демонстрации
         matches = []
         for alloy in self.alloys:
             score = self._calculate_similarity(composition, alloy['composition'])
@@ -136,10 +134,9 @@ class AlloyDatabase:
                     'composition': alloy['composition']
                 })
         
-        # Сортируем по убыванию схожести
         return sorted(matches, key=lambda x: x['score'], reverse=True)[:3]
     
-    def _calculate_similarity(self, comp1, comp2):
+    def _calculate_similarity(self, comp1: dict, comp2: dict) -> float:
         """Вычисляет схожесть составов"""
         common_elements = set(comp1.keys()) & set(comp2.keys())
         if not common_elements:
@@ -156,27 +153,24 @@ vision = YandexVision()
 analyzer = CompositionAnalyzer()
 database = AlloyDatabase("alloys_database.json")
 
-def get_main_keyboard():
+def get_main_keyboard() -> ReplyKeyboardMarkup:
     """Создает основную клавиатуру"""
-    from telegram import ReplyKeyboardMarkup
-    
     keyboard = [
         ["📸 Анализировать фото", "📊 Пример анализа"],
         ["🔍 База сплавов", "ℹ️ Помощь"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-def get_analysis_keyboard():
+def get_analysis_keyboard() -> ReplyKeyboardMarkup:
     """Создает клавиатуру после анализа"""
-    from telegram import ReplyKeyboardMarkup
-    
     keyboard = [
         ["🔄 Новый анализ", "🔍 База сплавов"],
         ["🏠 Главное меню", "ℹ️ Помощь"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /start"""
     user = update.message.from_user
     welcome_text = f"""
 👋 Привет, {user.first_name}!
@@ -193,35 +187,35 @@ Cu 75.45%, Ni 12.50%, Zn 9.76%
 
 Выбери действие ниже 👇
     """
-    update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
+    await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
 
-def handle_photo(update: Update, context: CallbackContext):
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик фотографий"""
     try:
-        # Скачиваем фото
-        photo_file = update.message.photo[-1].get_file()
+        photo_file = await update.message.photo[-1].get_file()
         
         # Создаем временную директорию
         os.makedirs("temp_images", exist_ok=True)
         file_path = f"temp_images/{update.update_id}.jpg"
         
-        photo_file.download(file_path)
+        await photo_file.download_to_drive(file_path)
         
-        update.message.reply_text("🔄 Обрабатываю изображение...")
+        await update.message.reply_text("🔄 Обрабатываю изображение...")
         logger.info(f"📷 Получено фото: {file_path}")
         
         # Распознаем текст
-        text = vision.extract_text_from_image(file_path)
+        text = await vision.extract_text_from_image(file_path)
         logger.info(f"📝 Распознанный текст: {text}")
         
         if not text:
-            update.message.reply_text("❌ Не удалось распознать текст на изображении")
+            await update.message.reply_text("❌ Не удалось распознать текст на изображении")
             return
         
         # Парсим состав
         composition = analyzer.parse_composition(text)
         
         # Анализируем и отправляем результат
-        send_analysis_result(update, composition)
+        await send_analysis_result(update, composition)
         
         # Удаляем временный файл
         if os.path.exists(file_path):
@@ -229,24 +223,24 @@ def handle_photo(update: Update, context: CallbackContext):
         
     except Exception as e:
         logger.error(f"Ошибка обработки фото: {e}")
-        update.message.reply_text("❌ Ошибка при обработке изображения")
+        await update.message.reply_text("❌ Ошибка при обработке изображения")
 
-def handle_text(update: Update, context: CallbackContext):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает все текстовые сообщения"""
     text = update.message.text
     logger.info(f"📝 Получен текст: {text}")
     
     # Сначала проверяем команды меню
-    if handle_menu_commands(update, text):
+    if await handle_menu_commands(update, text):
         return
     
     # Если не команда, пытаемся распарсить как химический состав
     composition = analyzer.parse_composition(text)
     
     if composition:
-        send_analysis_result(update, composition)
+        await send_analysis_result(update, composition)
     else:
-        update.message.reply_text(
+        await update.message.reply_text(
             "❌ Не удалось найти химический состав.\n\n"
             "Попробуйте в формате:\n"
             "• Cu 75.45%, Ni 12.50%, Zn 9.76%\n"
@@ -256,32 +250,32 @@ def handle_text(update: Update, context: CallbackContext):
             reply_markup=get_main_keyboard()
         )
 
-def handle_menu_commands(update, text):
+async def handle_menu_commands(update: Update, text: str) -> bool:
     """Обрабатывает команды меню, возвращает True если команда обработана"""
     if text == "📸 Анализировать фото":
-        update.message.reply_text("Отправьте фото с анализом состава металла")
+        await update.message.reply_text("Отправьте фото с анализом состава металла")
         return True
     elif text == "ℹ️ Помощь":
-        help_command(update, None)
+        await help_command(update, None)
         return True
     elif text == "📊 Пример анализа":
-        show_example(update)
+        await show_example(update)
         return True
     elif text == "🔍 База сплавов":
-        show_alloys_database(update)
+        await show_alloys_database(update)
         return True
     elif text == "🔄 Новый анализ":
-        update.message.reply_text("Отправьте фото или состав текстом для анализа", reply_markup=get_main_keyboard())
+        await update.message.reply_text("Отправьте фото или состав текстом для анализа", reply_markup=get_main_keyboard())
         return True
     elif text == "🏠 Главное меню":
-        start(update, None)
+        await start(update, None)
         return True
     return False
 
-def send_analysis_result(update, composition):
+async def send_analysis_result(update: Update, composition: dict) -> None:
     """Отправляет результат анализа"""
     if not composition:
-        update.message.reply_text(
+        await update.message.reply_text(
             "❌ Не удалось определить химический состав.\n\n"
             "Проверьте формат данных и попробуйте снова."
         )
@@ -296,9 +290,9 @@ def send_analysis_result(update, composition):
     
     # Формируем ответ
     response = format_analysis_response(composition, analysis, matches)
-    update.message.reply_text(response, reply_markup=get_analysis_keyboard(), parse_mode='Markdown')
+    await update.message.reply_text(response, reply_markup=get_analysis_keyboard(), parse_mode='Markdown')
 
-def format_analysis_response(composition, analysis, matches):
+def format_analysis_response(composition: dict, analysis: dict, matches: list) -> str:
     """Форматирует ответ с результатами анализа"""
     response = "🔬 *Результаты анализа*\n\n"
     
@@ -349,7 +343,8 @@ def format_analysis_response(composition, analysis, matches):
     
     return response
 
-def help_command(update: Update, context: CallbackContext):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработчик команды /help"""
     help_text = """
 📖 *Инструкция по использованию:*
 
@@ -371,9 +366,10 @@ Cu, Zn, Pb, Fe, Al, Ni, Sn, Ti, Si, C, Mn, Cr, Mg, Ag, Au и другие
 *🔍 База сплавов:*
 Используйте кнопку 'База сплавов' для просмотра всех доступных марок
     """
-    update.message.reply_text(help_text, parse_mode='Markdown')
+    await update.message.reply_text(help_text, parse_mode='Markdown')
 
-def show_example(update: Update):
+async def show_example(update: Update) -> None:
+    """Показывает пример анализа"""
     example_text = """
 📋 *Пример анализа:*
 
@@ -397,9 +393,10 @@ def show_example(update: Update):
 1. Мельхиор МН19
 2. Нейзильбер МНЦ15-20
     """
-    update.message.reply_text(example_text, parse_mode='Markdown')
+    await update.message.reply_text(example_text, parse_mode='Markdown')
 
-def show_alloys_database(update: Update):
+async def show_alloys_database(update: Update) -> None:
+    """Показывает базу сплавов"""
     database_info = """
 📚 *База сплавов в системе:*
 
@@ -424,13 +421,14 @@ def show_alloys_database(update: Update):
 
 *💡 Для поиска конкретного сплава отправьте его химический состав!*
     """
-    update.message.reply_text(database_info, parse_mode='Markdown')
+    await update.message.reply_text(database_info, parse_mode='Markdown')
 
-def error_handler(update: Update, context: CallbackContext):
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает ошибки"""
     logger.error(f"Ошибка при обработке сообщения: {context.error}")
 
-def main():
+def main() -> None:
+    """Запускает бота"""
     try:
         logger.info("🤖 Запуск бота...")
         
@@ -439,26 +437,24 @@ def main():
             logger.error("❌ Токен бота не найден!")
             return
         
-        updater = Updater(BOT_TOKEN, use_context=True)
-        dispatcher = updater.dispatcher
+        # Создаем Application
+        application = Application.builder().token(BOT_TOKEN).build()
         
-        # Обработчики команд
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("help", help_command))
-        
-        # Обработчики сообщений
-        dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
-        dispatcher.add_handler(MessageHandler(Filters.text, handle_text))
+        # Добавляем обработчики
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
         
         # Обработчик ошибок
-        dispatcher.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
         
         logger.info("✅ Бот запускается...")
-        updater.start_polling()
-        logger.info("🚀 Бот успешно запущен и готов к работе!")
         
-        # Бесконечная работа
-        updater.idle()
+        # Запускаем бота
+        application.run_polling()
+        
+        logger.info("🚀 Бот успешно запущен и готов к работе!")
         
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при запуске: {e}")
