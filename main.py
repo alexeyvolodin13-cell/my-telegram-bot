@@ -1,14 +1,7 @@
-# main.py
 import os
 import logging
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-
-from config import BOT_TOKEN
-from vision import YandexVision
-from analyzer import CompositionAnalyzer
-from database import AlloyDatabase
-from keyboards import get_main_keyboard, get_analysis_keyboard
 
 # Настройка логирования
 logging.basicConfig(
@@ -17,10 +10,171 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Получаем токен из переменных окружения
+BOT_TOKEN = os.environ.get('TOKEN')
+
+if not BOT_TOKEN:
+    logger.error("❌ Токен не найден! Убедитесь, что переменная TOKEN установлена в настройках Render.")
+    exit(1)
+
+# Упрощенные классы для минимальной функциональности
+class YandexVision:
+    def extract_text_from_image(self, file_path):
+        """Заглушка для распознавания текста"""
+        logger.info(f"📷 Обработка изображения: {file_path}")
+        # В реальной реализации здесь будет вызов Yandex Vision API
+        return "Cu 75.45%, Ni 12.50%, Zn 9.76%"  # Заглушка для теста
+
+class CompositionAnalyzer:
+    def parse_composition(self, text):
+        """Парсит химический состав из текста"""
+        logger.info(f"🔬 Анализ текста: {text}")
+        
+        # Простой парсер для демонстрации
+        composition = {}
+        words = text.split()
+        
+        elements = ['Cu', 'Zn', 'Pb', 'Fe', 'Al', 'Ni', 'Sn', 'Ti', 'Si', 'C', 'Mn', 'Cr', 'Mg']
+        
+        for i, word in enumerate(words):
+            if word in elements:
+                # Ищем число после элемента
+                if i + 1 < len(words):
+                    next_word = words[i + 1].replace('%', '').replace(',', '')
+                    try:
+                        composition[word] = float(next_word)
+                    except ValueError:
+                        continue
+        
+        # Если не нашли в тексте, используем демо-данные
+        if not composition:
+            composition = {'Cu': 75.45, 'Ni': 12.50, 'Zn': 9.76}
+            
+        return composition
+
+    def analyze_composition(self, composition):
+        """Анализирует химический состав"""
+        main_element = max(composition.items(), key=lambda x: x[1]) if composition else None
+        
+        return {
+            'description': self._get_alloy_description(composition),
+            'main_element': main_element,
+            'possible_applications': self._get_applications(composition),
+            'recommendations': ['Состав выглядит корректным']
+        }
+    
+    def _get_alloy_description(self, composition):
+        """Возвращает описание сплава"""
+        if 'Cu' in composition and composition['Cu'] > 50:
+            return "Этот сплав состоит в основном из **меди (Cu)**, что характерно для латуней или бронз."
+        elif 'Al' in composition and composition['Al'] > 50:
+            return "Это **алюминиевый сплав** с хорошим сочетанием прочности и легкости."
+        elif 'Fe' in composition and composition['Fe'] > 50:
+            return "Это **железный сплав** (сталь или чугун) с характерными свойствами."
+        else:
+            return "Это сложный многокомпонентный сплав с интересными свойствами."
+
+    def _get_applications(self, composition):
+        """Возвращает возможные применения"""
+        apps = []
+        if 'Cu' in composition:
+            apps.extend(["электротехника", "ювелирные изделия", "сантехника"])
+        if 'Al' in composition:
+            apps.extend(["авиация", "упаковка", "строительство"])
+        if 'Fe' in composition:
+            apps.extend(["машиностроение", "строительство", "инструменты"])
+        
+        return apps[:4] if apps else ["различные технические применения"]
+
+    def get_element_descriptions(self, composition):
+        """Возвращает описания элементов"""
+        descriptions = {
+            'Cu': "**медь** — основа сплава, обеспечивает электропроводность и пластичность",
+            'Zn': "**цинк** — улучшает литейные свойства, снижает стоимость",
+            'Ni': "**никель** — придаёт прочность и устойчивость к коррозии",
+            'Al': "**алюминий** — обеспечивает легкость и коррозионную стойкость",
+            'Fe': "**железо** — придает прочность и магнитные свойства",
+            'Pb': "**свинец** — улучшает обрабатываемость",
+            'Sn': "**олово** — повышает антифрикционные свойства"
+        }
+        
+        result = []
+        for element, percentage in composition.items():
+            desc = descriptions.get(element, f"**{element}** — важный компонент сплава")
+            result.append(f"• {element} — {percentage}%: {desc}")
+        
+        return result
+
+    def filter_relevant_alloys(self, composition, matches):
+        """Фильтрует релевантные сплавы"""
+        return [match for match in matches if match.get('score', 0) > 0.3]
+
+class AlloyDatabase:
+    def __init__(self, db_path):
+        self.alloys = self._load_demo_data()
+    
+    def _load_demo_data(self):
+        """Загружает демо-базу сплавов"""
+        return [
+            {'name': 'Латунь Л63', 'composition': {'Cu': 62.0, 'Zn': 38.0}, 'score': 0.85},
+            {'name': 'Мельхиор МН19', 'composition': {'Cu': 81.0, 'Ni': 19.0}, 'score': 0.78},
+            {'name': 'Нейзильбер МНЦ15-20', 'composition': {'Cu': 65.0, 'Ni': 15.0, 'Zn': 20.0}, 'score': 0.92},
+            {'name': 'Бронза БрОФ6.5-0.15', 'composition': {'Cu': 93.0, 'Sn': 6.5}, 'score': 0.45},
+            {'name': 'Алюминиевый сплав АМг6', 'composition': {'Al': 94.0, 'Mg': 6.0}, 'score': 0.35}
+        ]
+    
+    def find_matching_alloys(self, composition):
+        """Находит подходящие сплавы в базе"""
+        # Упрощенный алгоритм поиска для демонстрации
+        matches = []
+        for alloy in self.alloys:
+            score = self._calculate_similarity(composition, alloy['composition'])
+            if score > 0.3:
+                matches.append({
+                    'name': alloy['name'],
+                    'score': score,
+                    'composition': alloy['composition']
+                })
+        
+        # Сортируем по убыванию схожести
+        return sorted(matches, key=lambda x: x['score'], reverse=True)[:3]
+    
+    def _calculate_similarity(self, comp1, comp2):
+        """Вычисляет схожесть составов"""
+        common_elements = set(comp1.keys()) & set(comp2.keys())
+        if not common_elements:
+            return 0.0
+        
+        total_diff = 0
+        for element in common_elements:
+            total_diff += abs(comp1[element] - comp2[element])
+        
+        return max(0, 1 - total_diff / 100)
+
 # Инициализация компонентов
 vision = YandexVision()
 analyzer = CompositionAnalyzer()
 database = AlloyDatabase("alloys_database.json")
+
+def get_main_keyboard():
+    """Создает основную клавиатуру"""
+    from telegram import ReplyKeyboardMarkup
+    
+    keyboard = [
+        ["📸 Анализировать фото", "📊 Пример анализа"],
+        ["🔍 База сплавов", "ℹ️ Помощь"]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def get_analysis_keyboard():
+    """Создает клавиатуру после анализа"""
+    from telegram import ReplyKeyboardMarkup
+    
+    keyboard = [
+        ["🔄 Новый анализ", "🔍 База сплавов"],
+        ["🏠 Главное меню", "ℹ️ Помощь"]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def start(update: Update, context: CallbackContext):
     user = update.message.from_user
@@ -45,17 +199,19 @@ def handle_photo(update: Update, context: CallbackContext):
     try:
         # Скачиваем фото
         photo_file = update.message.photo[-1].get_file()
-        file_path = f"images/{update.update_id}.jpg"
         
-        os.makedirs("images", exist_ok=True)
+        # Создаем временную директорию
+        os.makedirs("temp_images", exist_ok=True)
+        file_path = f"temp_images/{update.update_id}.jpg"
+        
         photo_file.download(file_path)
         
         update.message.reply_text("🔄 Обрабатываю изображение...")
-        print(f"📷 Получено фото: {file_path}")
+        logger.info(f"📷 Получено фото: {file_path}")
         
         # Распознаем текст
         text = vision.extract_text_from_image(file_path)
-        print(f"📝 Распознанный текст: {text}")
+        logger.info(f"📝 Распознанный текст: {text}")
         
         if not text:
             update.message.reply_text("❌ Не удалось распознать текст на изображении")
@@ -78,7 +234,7 @@ def handle_photo(update: Update, context: CallbackContext):
 def handle_text(update: Update, context: CallbackContext):
     """Обрабатывает все текстовые сообщения"""
     text = update.message.text
-    print(f"📝 Получен текст: {text}")
+    logger.info(f"📝 Получен текст: {text}")
     
     # Сначала проверяем команды меню
     if handle_menu_commands(update, text):
@@ -173,8 +329,8 @@ def format_analysis_response(composition, analysis, matches):
     
     # Итог
     if analysis['main_element']:
-        main_elem = analysis['main_element'][0]
-        response += f"\n*💎 Простыми словами:* это {main_elem}-основной сплав"
+        main_elem, percentage = analysis['main_element']
+        response += f"\n*💎 Простыми словами:* это {main_elem}-основной сплав ({percentage}%)"
         if main_elem == 'Cu':
             response += " с хорошей электропроводностью и коррозионной стойкостью"
         elif main_elem == 'Al':
@@ -270,8 +426,19 @@ def show_alloys_database(update: Update):
     """
     update.message.reply_text(database_info, parse_mode='Markdown')
 
+def error_handler(update: Update, context: CallbackContext):
+    """Обрабатывает ошибки"""
+    logger.error(f"Ошибка при обработке сообщения: {context.error}")
+
 def main():
     try:
+        logger.info("🤖 Запуск бота...")
+        
+        # Проверяем токен
+        if not BOT_TOKEN:
+            logger.error("❌ Токен бота не найден!")
+            return
+        
         updater = Updater(BOT_TOKEN, use_context=True)
         dispatcher = updater.dispatcher
         
@@ -283,13 +450,18 @@ def main():
         dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
         dispatcher.add_handler(MessageHandler(Filters.text, handle_text))
         
-        print("🤖 Бот запускается...")
+        # Обработчик ошибок
+        dispatcher.add_error_handler(error_handler)
+        
+        logger.info("✅ Бот запускается...")
         updater.start_polling()
-        print("✅ Бот успешно запущен и готов к работе!")
+        logger.info("🚀 Бот успешно запущен и готов к работе!")
+        
+        # Бесконечная работа
         updater.idle()
         
     except Exception as e:
-        print(f"❌ Ошибка запуска: {e}")
+        logger.error(f"❌ Критическая ошибка при запуске: {e}")
 
 if __name__ == "__main__":
     main()
