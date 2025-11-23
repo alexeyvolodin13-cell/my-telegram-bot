@@ -274,7 +274,7 @@ async def show_alloys_database(update: Update) -> None:
     """
     await update.message.reply_text(database_info, parse_mode='Markdown')
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обрабатывает ошибки"""
     logger.error(f"Ошибка: {context.error}")
 
